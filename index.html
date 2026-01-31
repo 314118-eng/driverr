@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧公車勤務派遣</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        /* --- 視覺風格 --- */
+        :root {
+            --bg-dark: #0f172a;
+            --primary: #0ea5e9;
+            --accent: #ec4899;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #f87171;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+        }
+
+        body {
+            background-color: #000;
+            background-image: radial-gradient(circle at 50% 50%, #111827 0%, #000 100%);
+            color: var(--text-main);
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* === 登入卡片 === */
+        #login-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(2, 6, 23, 0.95);
+            backdrop-filter: blur(15px);
+            z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+            transition: opacity 0.5s ease;
+        }
+
+        .login-card {
+            width: 400px;
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 0 60px rgba(14, 165, 233, 0.2);
+        }
+
+        .login-icon { font-size: 3rem; color: var(--primary); margin-bottom: 20px; }
+        .login-title { font-size: 1.8rem; font-weight: bold; margin-bottom: 5px; }
+        .login-sub { color: var(--text-sub); margin-bottom: 30px; font-size: 0.9rem; }
+
+        .input-group { margin-bottom: 20px; text-align: left; }
+        .input-label { display: block; color: var(--primary); font-size: 0.85rem; margin-bottom: 8px; font-weight: bold; }
+        
+        .form-control {
+            width: 100%; padding: 12px; background: #1e293b; border: 1px solid #334155; color: #fff;
+            border-radius: 8px; font-size: 1rem; box-sizing: border-box; transition: all 0.3s;
+        }
+        .form-control:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2); }
+
+        .btn-start {
+            width: 100%; padding: 14px; background: linear-gradient(135deg, var(--primary), #3b82f6);
+            border: none; border-radius: 10px; color: white; font-size: 1.1rem; font-weight: bold;
+            cursor: pointer; margin-top: 10px; transition: transform 0.2s;
+        }
+        .btn-start:hover { transform: scale(1.02); }
+        .btn-start:disabled { background: #334155; cursor: not-allowed; transform: none; color: #64748b; }
+
+        #status-text {
+            margin-top: 15px; font-size: 0.85rem; color: var(--text-sub); min-height: 20px;
+        }
+
+        /* === 主畫面 === */
+        #app-container {
+            display: none; width: 100%; height: 100%; justify-content: center; align-items: center;
+            opacity: 0; transition: opacity 0.8s ease;
+        }
+        #app-container.visible { opacity: 1; }
+
+        .device-frame {
+            width: 1100px; height: 650px; background: #0f172a; border-radius: 20px;
+            box-shadow: 0 0 0 10px #1e293b, 0 30px 60px rgba(0,0,0,0.8);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        .header { height: 40px; background: rgba(0,0,0,0.4); border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; font-size: 0.9rem; }
+        
+        .main-stage { flex: 1; display: grid; grid-template-columns: 40% 60%; overflow: hidden; }
+
+        .left-panel { padding: 20px; display: flex; flex-direction: column; gap: 15px; border-right: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+
+        .card { background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 15px; display: flex; flex-direction: column; justify-content: center; position: relative; }
+        
+        .stop-section { display: flex; justify-content: space-between; align-items: center; flex: 0 0 auto; }
+        .current-label { font-size: 0.9rem; color: var(--text-sub); letter-spacing: 1px; margin-bottom: 5px; }
+        .stop-name-big { font-size: 2.5rem; font-weight: 800; background: linear-gradient(to right, #fff, #93c5fd); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .next-stop-box { text-align: right; }
+        .next-label { font-size: 0.8rem; color: var(--primary); }
+        .next-name { font-size: 1.1rem; font-weight: bold; }
+
+        .speed-box { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 25px 0; }
+        .speed-val { font-size: 5rem; font-weight: bold; line-height: 1; text-shadow: 0 0 20px rgba(14, 165, 233, 0.4); }
+        .speed-unit { font-size: 1.1rem; color: var(--text-sub); margin-top: 5px; }
+
+        .pax-panel { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.3); border-radius: 12px; padding: 20px; gap: 20px; }
+        .pax-top-row { width: 100%; text-align: center; }
+        .pax-bottom-row { width: 100%; display: flex; justify-content: space-around; align-items: center; }
+        .pax-item { text-align: center; }
+        .pax-val-lg { font-size: 4rem; font-weight: bold; line-height: 1.1; color: #fff; text-shadow: 0 0 15px rgba(255,255,255,0.3); }
+        .pax-val-md { font-size: 3rem; font-weight: bold; line-height: 1.1; }
+        .pax-label { font-size: 0.9rem; color: var(--text-sub); letter-spacing: 1px; margin-top: 5px; }
+        
+        .right-panel { background: #020617; padding: 20px 10px 20px 20px; overflow-y: auto; position: relative; }
+        .right-panel::-webkit-scrollbar { width: 4px; }
+        .right-panel::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+        .timeline-line { position: absolute; left: 54px; top: 20px; bottom: 20px; width: 4px; background: #334155; z-index: 0; }
+        
+        .stop-row { display: flex; align-items: center; margin-bottom: 20px; position: relative; z-index: 1; opacity: 0.4; transition: all 0.5s; }
+        .stop-row.active { opacity: 1; transform: scale(1.02) translateX(10px); }
+        
+        .stop-idx { 
+            width: 36px; height: 36px; border-radius: 50%; background: #1e293b; border: 3px solid #475569; color: #94a3b8; 
+            display: flex; justify-content: center; align-items: center; font-size: 1rem; margin-right: 20px; flex-shrink: 0; background-color: #020617; margin-left: 15px; 
+        }
+        .stop-row.active .stop-idx { border-color: var(--primary); background: var(--primary); color: #000; font-weight: bold; box-shadow: 0 0 15px var(--primary); }
+        
+        .stop-card-sm { 
+            flex: 1; background: #f1f5f9; color: #1e293b; padding: 15px 20px; border-radius: 10px; 
+            display: flex; justify-content: space-between; align-items: center; min-height: 60px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .stop-name-text { font-weight: 800; font-size: 1.5rem; color: #0f172a; }
+        
+        .tag { font-size: 1.0rem; padding: 6px 12px; border-radius: 6px; font-weight: bold; display: inline-flex; align-items: center; gap: 5px; }
+        .tag-none { color: #94a3b8; font-weight: normal; background: transparent; }
+        .tag-up { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+        .tag-down { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
+
+    </style>
+</head>
+<body>
+
+    <div id="login-overlay">
+        <div class="login-card">
+            <div class="login-icon"><i class="fa-solid fa-bus-simple"></i></div>
+            <div class="login-title">Smart Bus System</div>
+            <div class="login-sub">智慧公車勤務派遣 (buss-edde8)</div>
+
+            <div class="input-group">
+                <label class="input-label">駕駛員編號 (ID)</label>
+                <input type="text" id="driver-id" class="form-control" value="9527" placeholder="輸入編號">
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">搜尋/選擇路線</label>
+                <input type="text" id="route-search" class="form-control" placeholder="篩選路線 (例如: 101)" style="margin-bottom: 10px;">
+                <select id="route-id" class="form-control">
+                    <option value="" disabled selected>連線初始化...</option>
+                </select>
+            </div>
+
+            <button id="btn-start" class="btn-start" onclick="startSystem()" disabled>
+                等待資料中...
+            </button>
+            <div id="status-text">正在嘗試連線到伺服器...</div>
+        </div>
+    </div>
+
+    <div id="app-container">
+        <div class="device-frame">
+            <div class="header">
+                <div id="header-info"><i class="fa-solid fa-bus"></i> 路線: -- | 駕駛: --</div>
+                <div id="clock">--:--:--</div>
+                <div id="conn-status" style="color: var(--success); font-size: 0.8rem;">
+                    <i class="fa-solid fa-wifi"></i> Connected
+                </div>
+            </div>
+
+            <div class="main-stage">
+                <div class="left-panel">
+                    <div class="card stop-section">
+                        <div>
+                            <div class="current-label">CURRENT STOP</div>
+                            <div class="stop-name-big" id="current-stop">準備發車</div>
+                        </div>
+                        <div class="next-stop-box">
+                            <div class="next-label">NEXT STATION</div>
+                            <div class="next-name" id="next-stop">--</div>
+                        </div>
+                    </div>
+
+                    <div class="card speed-box">
+                        <div style="font-size:0.8rem; color:var(--text-sub); width:100%; text-align:center;">CURRENT SPEED</div>
+                        <div class="speed-val" id="speed-val">0</div>
+                        <div class="speed-unit">km/h</div>
+                    </div>
+
+                    <div class="card pax-panel">
+                        <div class="pax-top-row">
+                            <div class="pax-item">
+                                <div class="pax-val-lg" id="pax-total">0</div>
+                                <div class="pax-label">車內總人數 (Total)</div>
+                            </div>
+                        </div>
+                        <div class="pax-bottom-row">
+                            <div class="pax-item">
+                                <div class="pax-val-md" style="color:var(--success);" id="pax-in">0</div>
+                                <div class="pax-label">上車</div>
+                            </div>
+                            <div class="pax-item">
+                                <div class="pax-val-md" style="color:var(--warning);" id="pax-out">0</div>
+                                <div class="pax-label">下車</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="right-panel" id="list-container">
+                    <div style="text-align:center; padding-top:50px; color:#64748b;">
+                        <i class="fa-solid fa-spinner fa-spin"></i> 請先選擇路線並開始執勤
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. Firebase Config (buss-edde8) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBlGWoQG4pPbcu_0KM2sDJXXqj00Q_UZbw",
+            authDomain: "buss-edde8.firebaseapp.com",
+            projectId: "buss-edde8",
+            storageBucket: "buss-edde8.firebasestorage.app",
+            messagingSenderId: "124532907966",
+            appId: "1:124532907966:web:065b796df11326bfd963ef"
+        };
+
+        // --- 2. Initialize ---
+        let db;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            // 啟用離線持久化 (選用，增加穩定性)
+            db.enablePersistence().catch(err => {
+                if (err.code == 'failed-precondition') {
+                    console.log('Persistence failed: Multiple tabs open');
+                } else if (err.code == 'unimplemented') {
+                    console.log('Persistence not supported by browser');
+                }
+            });
+            console.log("Firestore initialized.");
+            
+            // 頁面載入後立即讀取
+            window.onload = loadRouteList;
+        } catch (e) {
+            console.error("Firebase init error", e);
+            alert("Firebase 初始化失敗，請檢查網路");
+        }
+
+        // --- 3. Global Variables ---
+        let STOPS_DATA = [];
+        let ALL_ROUTES = [];
+        let currentIdx = 0;
+        let totalPax = 12;
+
+        // --- 4. 讀取路線清單 (Hybrid Fetch: 雙重保險) ---
+        async function loadRouteList() {
+            const selectEl = document.getElementById('route-id');
+            const btnStart = document.getElementById('btn-start');
+            const searchInput = document.getElementById('route-search');
+            const statusText = document.getElementById('status-text');
+
+            statusText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 正在連線資料庫...';
+            statusText.style.color = "var(--text-sub)";
+
+            // 綁定搜尋事件
+            searchInput.oninput = (e) => filterRoutes(e.target.value.toLowerCase());
+
+            let snapshot;
+            let sourceMode = "SERVER"; // 標記來源
+
+            try {
+                // 【嘗試 A】優先：強制從伺服器抓最新資料
+                console.log("正在嘗試從 Server 讀取...");
+                snapshot = await db.collection("bus_routes").get({ source: 'server' });
+                
+            } catch (err) {
+                console.warn("Server 讀取失敗，切換至 Cache...", err);
+                
+                // 【嘗試 B】失敗後：自動降級讀取本地快取
+                try {
+                    statusText.innerText = "伺服器連線受阻，嘗試讀取離線資料...";
+                    snapshot = await db.collection("bus_routes").get({ source: 'cache' });
+                    sourceMode = "CACHE";
+                } catch (err2) {
+                    // 【全失敗】
+                    console.error("Cache 也讀取失敗:", err2);
+                    statusText.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 讀取失敗 (請檢查網路/權限)';
+                    statusText.style.color = "var(--danger)";
+                    selectEl.innerHTML = "<option>連線失敗</option>";
+                    return;
+                }
+            }
+
+            // --- 處理資料 ---
+            ALL_ROUTES = []; 
+
+            if (snapshot.empty) {
+                statusText.innerText = "資料庫是空的 (0 筆資料)";
+                statusText.style.color = "var(--warning)";
+                selectEl.innerHTML = "<option>無資料</option>";
+            } else {
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const stopCount = (data.stops && Array.isArray(data.stops)) ? data.stops.length : 0;
+                    const dir = data.direction === 0 ? "去程" : (data.direction === 1 ? "回程" : "");
+                    const displayRouteName = data.name || doc.id;
+
+                    ALL_ROUTES.push({
+                        id: doc.id,
+                        name: displayRouteName,
+                        direction: dir,
+                        stopCount: stopCount,
+                        searchKey: (displayRouteName + doc.id).toLowerCase()
+                    });
+                });
+                
+                // 根據來源顯示不同狀態
+                if (sourceMode === "CACHE") {
+                    statusText.innerHTML = `<i class="fa-solid fa-database"></i> 已載入 ${ALL_ROUTES.length} 筆離線資料 (Offline)`;
+                    statusText.style.color = "var(--warning)";
+                    document.getElementById('conn-status').innerHTML = '<i class="fa-solid fa-plug-circle-xmark"></i> Offline Mode';
+                    document.getElementById('conn-status').style.color = "var(--warning)";
+                } else {
+                    statusText.innerHTML = `<i class="fa-solid fa-check-circle"></i> 成功載入 ${ALL_ROUTES.length} 筆最新資料`;
+                    statusText.style.color = "var(--success)";
+                }
+
+                renderOptions(ALL_ROUTES);
+
+                btnStart.disabled = false;
+                btnStart.innerHTML = '開始執勤 <i class="fa-solid fa-arrow-right"></i>';
+            }
+        }
+
+        function filterRoutes(keyword) {
+            if (!keyword) {
+                renderOptions(ALL_ROUTES);
+                return;
+            }
+            const filtered = ALL_ROUTES.filter(route => route.searchKey.includes(keyword));
+            renderOptions(filtered);
+        }
+
+        function renderOptions(routes) {
+            const selectEl = document.getElementById('route-id');
+            selectEl.innerHTML = ""; 
+
+            if (routes.length === 0) {
+                const opt = document.createElement('option');
+                opt.text = "無符合的路線";
+                opt.disabled = true;
+                selectEl.add(opt);
+                return;
+            }
+
+            const defaultOpt = document.createElement('option');
+            defaultOpt.text = "請選擇路線...";
+            defaultOpt.value = "";
+            defaultOpt.disabled = true;
+            defaultOpt.selected = true;
+            selectEl.add(defaultOpt);
+
+            routes.forEach(r => {
+                const opt = document.createElement('option');
+                opt.value = r.id; 
+                opt.text = `${r.name} ${r.direction ? '('+r.direction+')' : ''} - [${r.stopCount}站]`;
+                opt.setAttribute('data-name', r.name);
+                selectEl.add(opt);
+            });
+        }
+
+        // --- 5. 開始執勤 ---
+        function startSystem() {
+            const driverId = document.getElementById('driver-id').value;
+            const selectEl = document.getElementById('route-id');
+            const routeId = selectEl.value;
+            
+            if (!routeId) {
+                alert("請選擇一條路線！");
+                return;
+            }
+
+            const selectedOption = selectEl.options[selectEl.selectedIndex];
+            const routeName = selectedOption.getAttribute('data-name') || routeId;
+
+            // 轉場動畫
+            document.getElementById('login-overlay').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('login-overlay').style.display = 'none';
+                const app = document.getElementById('app-container');
+                app.style.display = 'flex';
+                setTimeout(() => app.classList.add('visible'), 50);
+                
+                document.getElementById('header-info').innerHTML = 
+                    `<i class="fa-solid fa-bus"></i> 路線: ${routeName} (${routeId}) | 駕駛: ${driverId}`;
+                
+                fetchRouteData(routeId);
+                startDecorations();
+            }, 500);
+        }
+
+        // --- 6. 讀取站點 (同樣使用雙重保險) ---
+        async function fetchRouteData(routeId) {
+            const listContainer = document.getElementById('list-container');
+            listContainer.innerHTML = `<div style="text-align:center; padding-top:50px;"><i class="fa-solid fa-spinner fa-spin"></i> 正在載入站點...</div>`;
+
+            try {
+                // 優先 Server
+                let doc = await db.collection("bus_routes").doc(routeId).get({ source: 'server' });
+                processRouteDoc(doc);
+            } catch (err) {
+                console.warn("站點 Server 讀取失敗，切換 Cache...");
+                try {
+                    // 降級 Cache
+                    let doc = await db.collection("bus_routes").doc(routeId).get({ source: 'cache' });
+                    processRouteDoc(doc);
+                } catch (err2) {
+                    listContainer.innerHTML = "<div style='text-align:center; margin-top:50px; color:#f87171;'>讀取失敗</div>";
+                }
+            }
+        }
+
+        function processRouteDoc(doc) {
+            const listContainer = document.getElementById('list-container');
+            if (doc.exists) {
+                const data = doc.data();
+                if (data.stops && Array.isArray(data.stops) && data.stops.length > 0) {
+                    STOPS_DATA = data.stops.map(stop => {
+                        const sName = (typeof stop === 'object' && stop.name) ? stop.name : stop;
+                        return {
+                            name: sName,
+                            res_up: Math.random() > 0.7 ? Math.floor(Math.random()*3) : 0, 
+                            res_down: Math.random() > 0.8 ? Math.floor(Math.random()*2) : 0
+                        };
+                    });
+                    renderUI(STOPS_DATA, 0);
+                } else {
+                    listContainer.innerHTML = "<div style='text-align:center; margin-top:50px; color:#f87171;'>此路線沒有設定站點 (stops)</div>";
+                    document.getElementById('current-stop').innerText = data.name || "未知";
+                }
+            } else {
+                alert("路線資料不存在");
+            }
+        }
+
+        // --- 7. 畫面渲染 ---
+        function renderUI(stops, idx) {
+            const container = document.getElementById('list-container');
+            if(idx >= stops.length) idx = 0;
+
+            const curr = stops[idx];
+            const next = stops[idx+1] || {name:"終點站"};
+
+            document.getElementById('current-stop').innerText = curr.name;
+            document.getElementById('next-stop').innerText = next.name;
+
+            document.getElementById('pax-in').innerText = curr.res_up;
+            document.getElementById('pax-out').innerText = curr.res_down;
+            document.getElementById('pax-total').innerText = totalPax;
+
+            let html = '<div class="timeline-line"></div>';
+            stops.forEach((stop, i) => {
+                let activeClass = (i === idx) ? 'active' : '';
+                let tag = '<span class="tag tag-none">無預約</span>';
+                if (stop.res_up > 0) tag = `<span class="tag tag-up"><i class="fa-solid fa-arrow-up"></i> +${stop.res_up}</span>`;
+                if (stop.res_down > 0) {
+                    const dTag = `<span class="tag tag-down"><i class="fa-solid fa-arrow-down"></i> -${stop.res_down}</span>`;
+                    tag = (stop.res_up > 0) ? tag + " " + dTag : dTag;
+                }
+
+                html += `
+                    <div class="stop-row ${activeClass}" id="row-${i}">
+                        <div class="stop-idx">${i + 1}</div>
+                        <div class="stop-card-sm">
+                            <div class="stop-name-text">${stop.name}</div>
+                            <div>${tag}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+            
+            const el = document.getElementById(`row-${idx}`);
+            if(el) el.scrollIntoView({behavior: "smooth", block: "center"});
+        }
+
+        // --- 8. 模擬動畫 ---
+        function startDecorations() {
+            setInterval(() => {
+                document.getElementById('clock').innerText = new Date().toLocaleTimeString('zh-TW', {hour12:false});
+            }, 1000);
+            
+            setInterval(() => {
+                document.getElementById('speed-val').innerText = 30 + Math.floor(Math.random() * 20);
+            }, 800);
+
+            setInterval(() => {
+                if (STOPS_DATA.length > 0) {
+                    currentIdx++;
+                    if (currentIdx >= STOPS_DATA.length) currentIdx = 0;
+                    renderUI(STOPS_DATA, currentIdx);
+                }
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
